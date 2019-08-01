@@ -23,10 +23,12 @@
 #include "ns3/ipv4-routing-protocol.h"
 #include "ns3/simulator.h"
 #include "ns3/ipv4-drb.h"
+#include "ns3/ipv4-saps.h"
 
 namespace ns3 {
 
 class Ipv4Drb;
+class Ipv4Saps;
 
 /**
  * \ingroup internet
@@ -98,6 +100,9 @@ public:
   virtual void SetDrb(Ptr<Ipv4Drb> drb);
   virtual Ptr<Ipv4Drb> GetDrb ();
 
+  virtual void SetSaps(Ptr<Ipv4Saps> saps);
+  virtual Ptr<Ipv4Saps> GetSaps ();
+
 protected:
   virtual void DoDispose (void);
   virtual void DoInitialize (void);
@@ -122,6 +127,8 @@ private:
   Ptr<Ipv4> m_ipv4; //!< Ipv4 this protocol is associated with.
 
   Ptr<Ipv4Drb> m_drb;  //!< The DRB routing engine
+
+  Ptr<Ipv4Saps> m_saps;  //!< The SAPS routing engine
 };
 
 } // namespace ns3

@@ -25,6 +25,7 @@
 #include "ns3/ipv4-static-routing.h"
 #include "ipv4-list-routing.h"
 #include "ipv4-drb-tag.h"
+#include "ipv4-saps-tag.h"
 
 namespace ns3 {
 
@@ -45,7 +46,7 @@ Ipv4ListRouting::GetTypeId (void)
 
 
 Ipv4ListRouting::Ipv4ListRouting ()
-  : m_ipv4 (0), m_drb (0)
+  : m_ipv4 (0), m_drb (0), m_saps (0)
 {
   NS_LOG_FUNCTION (this);
 }
@@ -70,6 +71,7 @@ Ipv4ListRouting::DoDispose (void)
   m_routingProtocols.clear ();
   m_ipv4 = 0;
   m_drb = 0;
+  m_saps = 0;
 }
 
 void
@@ -151,6 +153,9 @@ Ipv4ListRouting::RouteInput (Ptr<const Packet> p, const Ipv4Header &header, Ptr<
   Ipv4DrbTag ipv4DrbTag;
   bool found = packet->PeekPacketTag(ipv4DrbTag);
 
+  Ipv4SapsTag ipv4SapsTag;
+  bool found_saps = packet->PeekPacketTag(ipv4SapsTag);
+
   FlowIdTag flowIdTag;
   bool foundFlowId = packet->PeekPacketTag(flowIdTag);
 
@@ -179,6 +184,33 @@ Ipv4ListRouting::RouteInput (Ptr<const Packet> p, const Ipv4Header &header, Ptr<
     {
       NS_LOG_ERROR ("Core switch address is missing");
     }
+  } else {
+        if (m_saps != 0 && !found_saps) {
+
+            NS_LOG_DEBUG ("SAPS is enabled");
+            uint32_t flowId = 0;
+            if (foundFlowId)
+            {
+              flowId = flowIdTag.GetFlowId ();
+            }
+            else
+            {
+              NS_LOG_ERROR ("Cannot find flow id in SAPS");
+            }
+            Ipv4Address address = m_saps->GetCoreSwitchAddress (flowId);
+            if (address != Ipv4Address()) // NULL check
+            {
+              Ipv4SapsTag ipv4SapsTag;
+              ipv4SapsTag.SetOriginalDestAddr(header.GetDestination ());
+              ipHeader.SetDestination(address);
+              packet->AddPacketTag(ipv4SapsTag);
+              NS_LOG_DEBUG ("Forwarding the packet to core switch: " << address);
+            }
+            else
+            {
+              NS_LOG_ERROR ("Core switch address is missing");
+            }
+        }
   }
 
   retVal = m_ipv4->IsDestinationAddress (header.GetDestination (), iif);
@@ -190,6 +222,11 @@ Ipv4ListRouting::RouteInput (Ptr<const Packet> p, const Ipv4Header &header, Ptr<
           Ipv4Address originalDestAddr = ipv4DrbTag.GetOriginalDestAddr();
           ipHeader.SetDestination(originalDestAddr);
           NS_LOG_DEBUG ("Receive DRB packet, bouncing packet to: " << originalDestAddr);
+        }
+        else if(found_saps && !m_ipv4->IsDestinationAddress (ipv4SapsTag.GetOriginalDestAddr(), iif)) {
+          Ipv4Address originalDestAddr = ipv4SapsTag.GetOriginalDestAddr();
+          ipHeader.SetDestination(originalDestAddr);
+          NS_LOG_DEBUG ("Receive SAPS packet, bouncing packet to: " << originalDestAddr);
         }
       else
         {
@@ -358,6 +395,18 @@ Ptr<Ipv4Drb>
 Ipv4ListRouting::GetDrb ()
 {
   return m_drb;
+}
+
+void
+Ipv4ListRouting::SetSaps(Ptr<Ipv4Saps> saps)
+{
+  m_saps = saps;
+}
+
+Ptr<Ipv4Saps>
+Ipv4ListRouting::GetSaps ()
+{
+  return m_saps;
 }
 
 } // namespace ns3
