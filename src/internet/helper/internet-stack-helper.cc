@@ -170,6 +170,7 @@
 #include "ns3/ipv4-static-routing-helper.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/ipv4-drb-helper.h"
+#include "ns3/ipv4-saps-helper.h"
 #include "ns3/ipv6-static-routing-helper.h"
 #include "ns3/ipv6-extension.h"
 #include "ns3/ipv6-extension-demux.h"
@@ -239,7 +240,8 @@ InternetStackHelper::InternetStackHelper ()
     m_ipv6Enabled (true),
     m_ipv4ArpJitterEnabled (true),
     m_ipv6NsRsJitterEnabled (true),
-    m_drb (false)
+    m_drb (false),
+    m_saps (false)
 
 {
   Initialize ();
@@ -323,6 +325,12 @@ void
 InternetStackHelper::SetDrb (bool enable)
 {
   m_drb = enable;
+}
+
+void
+InternetStackHelper::SetSaps (bool enable)
+{
+  m_saps = enable;
 }
 
 void
@@ -479,7 +487,12 @@ InternetStackHelper::Install (Ptr<Node> node) const
       {
         Ipv4DrbHelper drbHelper;
         (DynamicCast<Ipv4ListRouting>(ipv4Routing))->SetDrb(drbHelper.Create (node));
-      }
+      } else {
+                if (m_saps && DynamicCast<Ipv4ListRouting>(ipv4Routing)) {
+                        Ipv4SapsHelper sapsHelper;
+                        (DynamicCast<Ipv4ListRouting>(ipv4Routing))->SetSaps(sapsHelper.Create (node));
+                }
+        }
 
 
       ipv4->SetRoutingProtocol (ipv4Routing);

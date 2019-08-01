@@ -36,6 +36,7 @@ class Node;
 class Ipv4RoutingHelper;
 class Ipv6RoutingHelper;
 class Ipv4DrbHelper;
+class Ipv4SapsHelper;
 
 /**
  * \brief aggregate IP/TCP/UDP functionality to existing Nodes.
@@ -116,6 +117,8 @@ public:
 
 
   void SetDrb (bool enable);
+
+  void SetSaps (bool enable);
 
   void SetTLB (bool enable);
 
@@ -354,6 +357,8 @@ private:
   bool m_ipv6NsRsJitterEnabled;
 
   bool m_drb;
+
+  bool m_saps;
 
   bool m_TLBEnabled;
 
