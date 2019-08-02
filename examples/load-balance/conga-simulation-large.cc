@@ -17,6 +17,7 @@
 #include "ns3/tcp-resequence-buffer.h"
 #include "ns3/ipv4-drill-routing-helper.h"
 #include "ns3/ipv4-letflow-routing-helper.h"
+#include "ns3/ipv4-saps-routing-helper.h"
 
 #include <vector>
 #include <map>
@@ -61,7 +62,8 @@ enum RunMode {
     ECMP,
     Clove,
     DRILL,
-    LetFlow
+    LetFlow,
+    SAPS
 };
 
 std::stringstream tlbBibleFilename;
@@ -330,7 +332,7 @@ int main (int argc, char *argv[])
     cmd.AddValue ("StartTime", "Start time of the simulation", START_TIME);
     cmd.AddValue ("EndTime", "End time of the simulation", END_TIME);
     cmd.AddValue ("FlowLaunchEndTime", "End time of the flow launch period", FLOW_LAUNCH_END_TIME);
-    cmd.AddValue ("runMode", "Running mode of this simulation: Conga, Conga-flow, Presto, Weighted-Presto, DRB, FlowBender, ECMP, Clove, DRILL, LetFlow", runModeStr);
+    cmd.AddValue ("runMode", "Running mode of this simulation: Conga, Conga-flow, Presto, Weighted-Presto, DRB, FlowBender, ECMP, Clove, DRILL, LetFlow, SAPS", runModeStr);
     cmd.AddValue ("randomSeed", "Random seed, 0 for random generated", randomSeed);
     cmd.AddValue ("cdfFileName", "File name for flow distribution", cdfFileName);
     cmd.AddValue ("load", "Load of the network, 0.0 - 1.0", load);
@@ -487,9 +489,18 @@ int main (int argc, char *argv[])
     {
         runMode = LetFlow;
     }
+    else if (runModeStr.compare ("SAPS") == 0)
+    {
+        if (LINK_COUNT != 1)
+        {
+            NS_LOG_ERROR ("SAPS currently does not support link count more than 1");
+            return 0;
+        }
+        runMode = SAPS;
+    }    
     else
     {
-        NS_LOG_ERROR ("The running mode should be TLB, Conga, Conga-flow, Conga-ECMP, Presto, FlowBender, DRB and ECMP");
+        NS_LOG_ERROR ("The running mode should be TLB, Conga, Conga-flow, Conga-ECMP, Presto, FlowBender, SAPS, DRB and ECMP");
         return 0;
     }
 
@@ -606,6 +617,7 @@ int main (int argc, char *argv[])
     Ipv4DrbRoutingHelper drbRoutingHelper;
     Ipv4DrillRoutingHelper drillRoutingHelper;
     Ipv4LetFlowRoutingHelper letFlowRoutingHelper;
+    Ipv4SapsRoutingHelper sapsRoutingHelper;
 
     if (runMode == CONGA || runMode == CONGA_FLOW || runMode == CONGA_ECMP)
     {
@@ -616,6 +628,24 @@ int main (int argc, char *argv[])
         internet.Install (spines);
     	internet.Install (leaves);
     }
+    else if (runMode == SAPS)
+      {
+	// it seems original authors used 0 for per-dest (i.e., DRB), and 1 for per-flow (i.e., Presto
+	// or Weighted-Presto). So we should stick to 1 for SAPS....
+	Config::SetDefault ("ns3::Ipv4SapsRouting::Mode", UintegerValue (1)); // Per flow
+
+        listRoutingHelper.Add (sapsRoutingHelper, 1);
+        listRoutingHelper.Add (globalRoutingHelper, 0);
+        internet.SetRoutingHelper (listRoutingHelper);
+        internet.Install (servers);
+
+        listRoutingHelper.Clear ();
+        listRoutingHelper.Add (xpathRoutingHelper, 1);
+        listRoutingHelper.Add (globalRoutingHelper, 0);
+        internet.SetRoutingHelper (listRoutingHelper);
+        internet.Install (spines);
+        internet.Install (leaves);
+      }
     else if (runMode == PRESTO || runMode == DRB || runMode == WEIGHTED_PRESTO)
     {
         if (runMode == DRB)
@@ -721,6 +751,19 @@ int main (int argc, char *argv[])
                                                   "MaxTh", DoubleValue (RED_QUEUE_MARKING * PACKET_SIZE));
     }
 
+    /* TODO-SMI :: Do we need to do some setup on endhosts for SAPS??
+       This portion of code handles setting up things at server end. No related code here for DRB
+       Our main challengs in SAPS: (1) get input for mice/elephant threshold; (2) create virtual topologies
+       based on knowledge of partial failures; (3) do correct flow -> VT mapping, and ensure all packets
+       of a specific flow that should be mapped to a given VT, have their packets only routed to that VT
+
+       Have to ensure mapping decision is made at the right time, flow-ID and decision for VT are stored
+       at time of flow creation (on switch), and we persist with this.
+
+       How do we learn about link failures in SAPS here?
+
+     */
+    
     NS_LOG_INFO ("Configuring servers");
     // Setting servers
     p2p.SetDeviceAttribute ("DataRate", DataRateValue (DataRate (LEAF_SERVER_CAPACITY)));
@@ -1055,7 +1098,7 @@ int main (int argc, char *argv[])
         }
     }
 
-    if (runMode == ECMP || runMode == PRESTO || runMode == WEIGHTED_PRESTO || runMode == DRB || runMode == FlowBender || runMode == TLB || runMode == Clove)
+    if (runMode == ECMP || runMode == PRESTO || runMode == WEIGHTED_PRESTO || runMode == DRB || runMode == SAPS || runMode == FlowBender || runMode == TLB || runMode == Clove)
     {
         NS_LOG_INFO ("Populate global routing tables");
         Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
@@ -1112,6 +1155,60 @@ int main (int argc, char *argv[])
                 }
             }
         }
+    } else {
+
+      if ( runMode == SAPS ) {
+	// initiate for SAPS
+        NS_LOG_INFO ("Configuring SAPS / PRESTO paths");
+        for (int i = 0; i < LEAF_COUNT; i++)
+        {
+            for (int j = 0; j < SERVER_COUNT; j++)
+            {
+                for (int k = 0; k < SPINE_COUNT; k++)
+                {
+                    int serverIndex = i * SERVER_COUNT + j;
+                    Ptr<Ipv4SapsRouting> sapsRouting = sapsRoutingHelper.GetSapsRouting (servers.Get (serverIndex)->GetObject<Ipv4> ());
+		    if (runMode == SAPS)
+                    {
+                        sapsRouting->AddPath (leafToSpinePath[std::make_pair (i, k)]);
+                    }
+                    else if (runMode == WEIGHTED_PRESTO)
+                    {
+                        // If the capacity of a uplink is reduced, the weight should be reduced either
+                        if (asymLink.find (std::make_pair(i, k)) != asymLink.end ())
+                        {
+                            sapsRouting->AddWeightedPath (PRESTO_RATIO * 0.2, leafToSpinePath[std::make_pair (i, k)]);
+                        }
+                        else
+                        {
+                            // Check whether the spine down to the leaf is reduced and add the exception
+                            std::set<Ipv4Address> exclusiveIPs;
+                            for (int l = 0; l < LEAF_COUNT; l++)
+                            {
+                                if (asymLink.find (std::make_pair(k, l)) != asymLink.end ())
+                                {
+                                    for (int m = l * SERVER_COUNT; m < l * SERVER_COUNT + SERVER_COUNT; m++)
+                                    {
+                                        Ptr<Node> destServer = servers.Get (m);
+                                        Ptr<Ipv4> ipv4 = destServer->GetObject<Ipv4> ();
+                                        Ipv4InterfaceAddress destInterface = ipv4->GetAddress (1,0);
+                                        Ipv4Address destAddress = destInterface.GetLocal ();
+                                        sapsRouting->AddWeightedPath (destAddress, PRESTO_RATIO * 0.2, leafToSpinePath[std::make_pair (i, k)]);
+                                        exclusiveIPs.insert (destAddress);
+                                    }
+                                }
+                            }
+                            sapsRouting->AddWeightedPath (PRESTO_RATIO, leafToSpinePath[std::make_pair (i, k)], exclusiveIPs);
+                        }
+                    }
+                    else
+                    {
+                        sapsRouting->AddPath (PRESTO_RATIO, leafToSpinePath[std::make_pair (i, k)]);
+                    }
+		}
+	    }
+	}	
+      }
     }
 
     if (runMode == Clove)
@@ -1323,6 +1420,12 @@ int main (int argc, char *argv[])
         flowMonitorFilename << "drb-simulation-";
         linkMonitorFilename << "drb-simulation-";
         rbTraceFilename << "drb-simulation-";
+    }
+    else if (runMode == SAPS)
+    {
+        flowMonitorFilename << "saps-simulation-";
+        linkMonitorFilename << "saps-simulation-";
+        rbTraceFilename << "saps-simulation-";
     }
     else if (runMode == ECMP)
     {
